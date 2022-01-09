@@ -190,3 +190,93 @@ class CSTRsys():
         self.u_data=u
 
 
+class Sys_():
+    def __init__(self,eq_sys,state_variables,actuation_Variables,x0):
+        
+        #State variables
+        self.Xsv=state_variables
+        self.U=actuation_Variables
+
+        self.sys=eq_sys
+
+        self.sisys=lambdify(self.Xsv.tolist()+self.U.tolist(),self.sys)
+
+        self.initial_conditions(x0)
+        self.set_states_mean(Xm=self.z0,Um=0)
+
+    def initial_conditions(self,z0=[50.5,2.113,88,0]):
+        self.z0=z0
+
+    def sym_lin_sys(self):
+            self.slA=(sympy.Matrix(self.sys).jacobian(self.Xsv))
+            self.slB=(sympy.Matrix(self.sys).jacobian(self.U))
+
+    def lin_sys(self,Xc,Uc):
+        Vtr=list(np.vstack((self.Xsv,self.U)).T[0])
+        lA=self.slA.subs(dict(zip(Vtr,list(np.hstack((Xc,Uc))))))
+        lB=self.slB.subs(dict(zip(Vtr,np.hstack((Xc,Uc)))))
+        return lA,lB
+    
+    def set_states_mean(self,Xm,Um):
+        self.Xm=Xm
+        self.Um=Um
+    
+    def lmodel(self,X,t,u):
+        A,B=self.lin_sys(X,u)
+        return list(np.matmul(A,X)+self.Xm+np.matmul(B,u)+self.Um)
+
+    def model(self,X,t,u):
+        return list(np.array(self.sisys(*(X.tolist()+[u]))).reshape(-1))
+
+    def sym(self,tf,t0=0,dT=0.1):
+        t=np.linspace(t0,tf,int((tf-t0)/(dT)))
+        self.z_data = odeint(self.model,self.z0,t,args=(1.0,))
+    
+    #def sym_u(self,tf,t0=0,dT=0.1):
+    def sym_step(self,tf,up=[[0,1]],t0=0,dT=0.1):
+        n=int((tf-t0)/(dT))
+        t=np.linspace(t0,tf,n)
+        u=np.zeros(t.shape)
+        up=np.array(up)
+        for us in up:
+            u[t>=us[0]]=us[1]
+
+        Xs=np.empty((t.shape[0],self.sys.shape[0]))
+        Xs[0,:]=self.z0
+
+        temp_z0=self.z0
+
+        for i in range (1,n):
+            tspan=[t[i-1],t[i]]
+            X = odeint(self.model,temp_z0,tspan,args=(u[i],))
+            Xs[i,:]=X[0]
+            temp_z0 = X[1]
+        self.t_data=t
+        self.z_data=Xs
+        self.u_data=u
+
+    def sym_u(self,controller,reference,tf=1000,t0=0,dT=0.1):
+    #def sym_u(self,controller,tf=1000,t0=0,dT=0.1):
+        n=int((tf-t0)/(dT))
+        t=np.linspace(t0,tf,n)
+        u=np.zeros(t.shape)
+
+        Xs=np.empty((t.shape[0],self.sys.shape[0]))
+        Xs[0,:]=self.z0
+
+        temp_z0=self.z0
+
+        for i in range (1,n):
+            tspan=[t[i-1],t[i]]
+            #Control input
+            #function (model,t,Xs)
+            ui=controller.u_gain_based(reference-temp_z0)
+
+
+            X = odeint(self.model,temp_z0,tspan,args=(ui[0],))
+            Xs[i,:]=X[0]
+            u[i]=ui[0]
+            temp_z0 = X[1]
+        self.t_data=t
+        self.z_data=Xs
+        self.u_data=u
